@@ -1,5 +1,6 @@
 ---
 title: "Classification Summative MISCADA"
+Name: Reeshel Dsouza - qywk08
 output: html_document
 ---
 
@@ -15,16 +16,14 @@ When you click the **Knit** button a document will be generated that includes bo
 
 ```{r}
 #using the heart failure data
-heart.data <- readr::read_csv("C:/Users/RNVD/Downloads/heart_failure.csv")
+heart.data <- readr::read_csv("https://www.maths.dur.ac.uk/users/hailiang.du/assignment_data/heart_failure.csv")
 View(heart.data)
 dim(heart.data)
+library("skimr")
 skim(heart.data)
 
 ```
 ```{r}
-library("skimr")
-skim(heart.data)
-
 library("tidyverse")
 library("ggplot2")
 
@@ -38,45 +37,17 @@ ggplot(heart.data,
 ggplot(heart.data, aes(x = factor(heart.data$fatal_mi), y = heart.data$ejection_fraction)) +
   geom_boxplot()
 
-#ggplot(heart.data,aes(x=heart.data$anaemia, y=heart.data$fatal_mi))+geom_col()
-
-ggplot(heart.data, aes(x = heart.data$serum_creatinine, fill = factor(heart.data$fatal_mi))) +
-  geom_histogram(position = "identity", alpha = 0.5)
-
 ggplot(heart.data, aes(x = heart.data$diabetes, fill = factor(heart.data$fatal_mi))) +
   geom_bar(position = "identity", alpha = 0.5)
 
 ggplot(heart.data, aes(x = factor(heart.data$high_blood_pressure), fill = factor(heart.data$fatal_mi))) +
   geom_bar(position = "dodge")
-#these are plots only for the count of smokers and non smokers
-# ggplot(heart.data, aes(x = factor(smoking))) +
-#   geom_bar() +
-#   labs(x = "Smoking (0=No, 1=Yes)", y = "Count")
-# 
-# ggplot(heart.data, aes(x = factor(diabetes))) +
-#   geom_bar() +
-#   labs(x = "Diabetes (0=No, 1=Yes)", y = "Count")
 
 
-#doubtful on these as they are giving similar results
-ggplot(heart.data, aes(x = factor(heart.data$smoking), fill = factor(heart.data$fatal_mi))) +
-  geom_bar(position = "fill") +
-  labs(y = "Proportion")
-
-ggplot(heart.data, aes(x = factor(heart.data$diabetes), fill = factor(heart.data$fatal_mi))) +
-  geom_bar(position = "fill")
 
 ```
 
 
-```{r}
-#Model Fitting
-#tried glm dk wt it does but check
-heart_fit <- glm(fatal_mi ~ ., binomial, heart.data)
-heart_fit
-plot(heart_fit)
-summary(heart_fit)
-```
 ```{r}
 library("mlr3")
 set.seed(200)
@@ -92,13 +63,12 @@ as.data.table(mlr_learners)
 library("mlr3verse")
 
 cv5 <- rsmp("cv", folds = 5)
-cv5$instantiate(heart.mlr)
-
-plot(heart.mlr)
+l<-cv5$instantiate(heart.mlr)
+l
 
 ```
 ```{r}
-#Model Improvements
+#Model Fitting and Improvements
 lrn_lda <- lrn("classif.lda",predict_type = "prob")
 lrn_log <- lrn("classif.log_reg",predict_type = "prob")
 lrn_glm <-  lrn("classif.glmnet",predict_type = "prob")
@@ -162,63 +132,41 @@ tree_rpart <- res$resample_result(6)$learners[[1]]$model
 plot(tree_rpart, compress = TRUE, margin =0.1, uniform=TRUE)
 text(tree_rpart, use.n = TRUE, cex=0.8, all=TRUE, xpd = TRUE)
 ```
-```{r}
-#dk if this part is necessary - mostly not needed
-# Pipeline for preprocessing
-pl_missing <- NULL 
-pl_factor <- po("encode")  
-pl_xgb <- pl_factor %>>% lrn("classif.xgboost", predict_type = "prob")
 
-
-# Apply to logistic regression
-pl_log <- pl_factor %>>% po(lrn("classif.log_reg", predict_type = "prob"))
-
-# Apply to random forest
-pl_rf <- pl_factor %>>% po(lrn("classif.ranger", predict_type = "prob"))
-
-# Benchmark again
-res2 <- benchmark(data.table(
-  task = list(heart.mlr),
-  learner = list(pl_log, pl_rf,pl_xgb),
-  resampling = list(cv5)
-))
-
-as.data.table(res2$aggregate(list(
-  msr("classif.acc"),
-  msr("classif.auc")
-)))
-
-```
 
 ```{r}
 #hyperparameter tuning
-#using random forests and xgboost with diff parameters
+#using random forests and xgboost with diff num_trees
+library(mlr3tuning)
 set.seed(200)
-learners1 <- list(
-  lrn("classif.ranger", num.trees = 300,predict_type = "prob", id="numTrees_300"),
-  lrn("classif.ranger", num.trees = 500,predict_type = "prob",id="numTrees_500"),
-  lrn("classif.ranger", num.trees = 700,predict_type = "prob",id="numTrees_500")
-)
 
-res3 <- benchmark(data.table(
-  task = list(heart.mlr),
-  learner = learners1,
-  resampling = list(cv5)
-))
+k_values <- seq(100, 1000, by = 100)
 
-metrics3 <- as.data.table(res3$aggregate(list(
-  msr("classif.acc"),
-  msr("classif.auc"),
-  msr("classif.fpr"),
-  msr("classif.fnr")
-)))
-metrics3
-autoplot(res3)
+results <- data.frame()
+
+for (nt in k_values) {
+  learner <- lrn("classif.ranger",
+                 num.trees = nt,
+                 predict_type = "prob")
+  
+  res <- resample(
+    task = heart.mlr,
+    learner = learner,
+    resampling = cv5
+  )
+  
+  per <- res$aggregate(msr("classif.auc"))
+  
+  results <- rbind(results,
+                   data.frame(num.trees = nt, auc = per))
+}
+
+results
 
 ```
 ```{r}
 #Final Model
-final_model <- lrn("classif.ranger",num_trees=500, predict_type = "prob")
+final_model <- lrn("classif.ranger",num.trees=600, predict_type = "prob")
 
 set.seed(200)
 
@@ -236,10 +184,4 @@ pred$score(msr("classif.auc"))
 
 pred$confusion
 ```
-```{r}
-# Change threshold
-pred.data.response <- ifelse(pred$prob[,2] > 0.3, 1, 0)
 
-# New confusion matrix
-table(truth = pred$truth, pred = pred$data$response)
-```

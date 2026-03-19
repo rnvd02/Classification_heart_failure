@@ -1,0 +1,245 @@
+---
+title: "Classification Summative MISCADA"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+#using the heart failure data
+heart.data <- readr::read_csv("C:/Users/RNVD/Downloads/heart_failure.csv")
+View(heart.data)
+dim(heart.data)
+skim(heart.data)
+
+```
+```{r}
+library("skimr")
+skim(heart.data)
+
+library("tidyverse")
+library("ggplot2")
+
+table(heart.data$fatal_mi)
+#there might be class imablance as there are twice as more negative 0 cases as there are positive 1 cases
+
+ggplot(heart.data,
+      aes(x = heart.data$age)) +
+      geom_histogram()
+
+ggplot(heart.data, aes(x = factor(heart.data$fatal_mi), y = heart.data$ejection_fraction)) +
+  geom_boxplot()
+
+#ggplot(heart.data,aes(x=heart.data$anaemia, y=heart.data$fatal_mi))+geom_col()
+
+ggplot(heart.data, aes(x = heart.data$serum_creatinine, fill = factor(heart.data$fatal_mi))) +
+  geom_histogram(position = "identity", alpha = 0.5)
+
+ggplot(heart.data, aes(x = heart.data$diabetes, fill = factor(heart.data$fatal_mi))) +
+  geom_bar(position = "identity", alpha = 0.5)
+
+ggplot(heart.data, aes(x = factor(heart.data$high_blood_pressure), fill = factor(heart.data$fatal_mi))) +
+  geom_bar(position = "dodge")
+#these are plots only for the count of smokers and non smokers
+# ggplot(heart.data, aes(x = factor(smoking))) +
+#   geom_bar() +
+#   labs(x = "Smoking (0=No, 1=Yes)", y = "Count")
+# 
+# ggplot(heart.data, aes(x = factor(diabetes))) +
+#   geom_bar() +
+#   labs(x = "Diabetes (0=No, 1=Yes)", y = "Count")
+
+
+#doubtful on these as they are giving similar results
+ggplot(heart.data, aes(x = factor(heart.data$smoking), fill = factor(heart.data$fatal_mi))) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion")
+
+ggplot(heart.data, aes(x = factor(heart.data$diabetes), fill = factor(heart.data$fatal_mi))) +
+  geom_bar(position = "fill")
+
+```
+
+
+```{r}
+#Model Fitting
+#tried glm dk wt it does but check
+heart_fit <- glm(fatal_mi ~ ., binomial, heart.data)
+heart_fit
+plot(heart_fit)
+summary(heart_fit)
+```
+```{r}
+library("mlr3")
+set.seed(200)
+heart.data$fatal_mi <- as.factor(heart.data$fatal_mi)
+
+heart.mlr <- TaskClassif$new(id = "heart",
+                               backend = heart.data,
+                               target = "fatal_mi",
+                               positive = "1")
+heart.mlr
+as.data.table(mlr_learners)
+
+library("mlr3verse")
+
+cv5 <- rsmp("cv", folds = 5)
+cv5$instantiate(heart.mlr)
+
+plot(heart.mlr)
+
+```
+```{r}
+#Model Improvements
+lrn_lda <- lrn("classif.lda",predict_type = "prob")
+lrn_log <- lrn("classif.log_reg",predict_type = "prob")
+lrn_glm <-  lrn("classif.glmnet",predict_type = "prob")
+lrn_xgboost <- lrn("classif.xgboost", predict_type = "prob") #might need package
+lrn_baseline <- lrn("classif.featureless", predict_type = "prob")
+lrn_cart <- lrn("classif.rpart", predict_type = "prob")
+lrn_ranger   <- lrn("classif.ranger", predict_type = "prob") #needs package
+
+#Benchmark
+res <- benchmark(data.table(
+  task=list(heart.mlr),
+  learner = list(lrn_lda, lrn_log, lrn_glm,lrn_xgboost, lrn_baseline, lrn_cart,lrn_ranger ),
+  resampling = list(cv5)
+),store_models = TRUE )
+metrics <- as.data.table(res$aggregate(list(
+  msr("classif.acc"),
+  msr("classif.auc"),
+  msr("classif.fpr"),
+  msr("classif.fnr")
+)))
+metrics
+autoplot(res)
+
+metrics$learner_id <- factor(metrics$learner_id,
+                             levels = c("classif.lda","classif.log_reg","classif.glmnet",
+                                        "classif.xgboost","classif.featureless",
+                                        "classif.rpart","classif.ranger"),
+                             labels = c("LDA","LogReg","glmnet","XGBoost","Baseline","CART","Ranger"))
+
+p1<-ggplot(metrics,
+       aes(x = learner_id, y= classif.acc))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  labs(x="Learner", y="Accuracy")
+
+p2<-ggplot(metrics,
+       aes(x = learner_id, y= classif.auc))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  labs(x="Learner", y="AUC")
+
+p3<-ggplot(metrics,
+       aes(x = learner_id, y= classif.fpr))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  labs(x="Learner", y="False Positive Rate")
+
+p4<-ggplot(metrics,
+       aes(x = learner_id, y= classif.fnr))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  labs(x="Learner", y="False Negative Rate")
+
+gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2, ncol = 2)
+
+```
+```{r}
+tree_rpart <- res$resample_result(6)$learners[[1]]$model
+
+# Plot
+plot(tree_rpart, compress = TRUE, margin =0.1, uniform=TRUE)
+text(tree_rpart, use.n = TRUE, cex=0.8, all=TRUE, xpd = TRUE)
+```
+```{r}
+#dk if this part is necessary - mostly not needed
+# Pipeline for preprocessing
+pl_missing <- NULL 
+pl_factor <- po("encode")  
+pl_xgb <- pl_factor %>>% lrn("classif.xgboost", predict_type = "prob")
+
+
+# Apply to logistic regression
+pl_log <- pl_factor %>>% po(lrn("classif.log_reg", predict_type = "prob"))
+
+# Apply to random forest
+pl_rf <- pl_factor %>>% po(lrn("classif.ranger", predict_type = "prob"))
+
+# Benchmark again
+res2 <- benchmark(data.table(
+  task = list(heart.mlr),
+  learner = list(pl_log, pl_rf,pl_xgb),
+  resampling = list(cv5)
+))
+
+as.data.table(res2$aggregate(list(
+  msr("classif.acc"),
+  msr("classif.auc")
+)))
+
+```
+
+```{r}
+#hyperparameter tuning
+#using random forests and xgboost with diff parameters
+set.seed(200)
+learners1 <- list(
+  lrn("classif.ranger", num.trees = 300,predict_type = "prob", id="numTrees_300"),
+  lrn("classif.ranger", num.trees = 500,predict_type = "prob",id="numTrees_500"),
+  lrn("classif.ranger", num.trees = 700,predict_type = "prob",id="numTrees_500")
+)
+
+res3 <- benchmark(data.table(
+  task = list(heart.mlr),
+  learner = learners1,
+  resampling = list(cv5)
+))
+
+metrics3 <- as.data.table(res3$aggregate(list(
+  msr("classif.acc"),
+  msr("classif.auc"),
+  msr("classif.fpr"),
+  msr("classif.fnr")
+)))
+metrics3
+autoplot(res3)
+
+```
+```{r}
+#Final Model
+final_model <- lrn("classif.ranger",num_trees=500, predict_type = "prob")
+
+set.seed(200)
+
+split <- partition(heart.mlr, ratio = 0.8)
+train_set <- heart.mlr$clone()$filter(split$train)
+test_set  <- heart.mlr$clone()$filter(split$test)
+
+final_model$train(train_set)
+
+# Predictions
+pred <- final_model$predict(test_set)
+
+pred$score(msr("classif.acc"))
+pred$score(msr("classif.auc"))
+
+pred$confusion
+```
+```{r}
+# Change threshold
+pred.data.response <- ifelse(pred$prob[,2] > 0.3, 1, 0)
+
+# New confusion matrix
+table(truth = pred$truth, pred = pred$data$response)
+```

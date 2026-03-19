@@ -87,7 +87,8 @@ metrics <- as.data.table(res$aggregate(list(
   msr("classif.acc"),
   msr("classif.auc"),
   msr("classif.fpr"),
-  msr("classif.fnr")
+  msr("classif.fnr"),
+  msr("classif.logloss")
 )))
 metrics
 autoplot(res)
@@ -124,6 +125,12 @@ p4<-ggplot(metrics,
 
 gridExtra::grid.arrange(p1, p2, p3, p4, nrow = 2, ncol = 2)
 
+ggplot(metrics,
+       aes(x = learner_id, y= classif.logloss))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(guide = guide_axis(n.dodge=2))+
+  labs(x="Learner", y="False Negative Rate")
+
 ```
 ```{r}
 tree_rpart <- res$resample_result(6)$learners[[1]]$model
@@ -155,10 +162,10 @@ for (nt in k_values) {
     resampling = cv5
   )
   
-  per <- res$aggregate(msr("classif.auc"))
+  per <- res$aggregate(msr("classif.logloss"))
   
   results <- rbind(results,
-                   data.frame(num.trees = nt, auc = per))
+                   data.frame(num.trees = nt, logloss = per))
 }
 
 results
@@ -181,6 +188,7 @@ pred <- final_model$predict(test_set)
 
 pred$score(msr("classif.acc"))
 pred$score(msr("classif.auc"))
+pred$score(msr("classif.logloss"))
 
 pred$confusion
 ```
